@@ -1,0 +1,28 @@
+results/
+figures/
+checkpoints/
+slurm_logs/
+*.csv
+*.tsv
+*.pt
+*.ckpt
+*.npz
+*.npy
+*.nc
+*.h5
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+env/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Notes
+notes/

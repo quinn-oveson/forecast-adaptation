@@ -1,0 +1,7 @@
+name: forecast-adaptation
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pytorch-gpu=2.5 
+  - numpy=2.5

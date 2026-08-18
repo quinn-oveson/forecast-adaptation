@@ -1,0 +1,10 @@
+name: forecast-adaptation
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - ipykernel
+  - pytorch=2.5
+  - numpy=2.5
+  - matplotlib
+  - torchvision

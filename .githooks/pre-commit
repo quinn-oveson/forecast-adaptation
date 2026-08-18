@@ -1,0 +1,19 @@
+#!/bin/sh
+# Block oversized files from entering history. Enable with:
+#   git config core.hooksPath .githooks
+MAXKB=1024
+fail=0
+for f in $(git diff --cached --name-only --diff-filter=ACM); do
+    [ -f "$f" ] || continue
+    kb=$(du -k "$f" | cut -f1)
+    if [ "$kb" -gt "$MAXKB" ]; then
+        printf 'blocked: %s is %s KB (limit %s KB)\n' "$f" "$kb" "$MAXKB"
+        fail=1
+    fi
+done
+if [ "$fail" -ne 0 ]; then
+    printf '\nResults belong in results/ (gitignored) and are regenerated, not versioned.\n'
+    printf 'If this file genuinely belongs in history: git commit --no-verify\n'
+    exit 1
+fi
+exit 0
