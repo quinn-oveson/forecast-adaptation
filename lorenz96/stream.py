@@ -50,11 +50,32 @@ class CycleStream:
         self.seed, self.noise, self.n_cycles, self.chunk = seed, noise, n_cycles, chunk
         self.history, self.F = history, F
 
+        # Chunk seeds are `seed * 31 + c`, so c must stay inside that stride: at c >= 31, chunk
+        # c of seed s IS chunk c - 31 of seed s + 1, and two runs silently train on identical
+        # data while reporting as independent seeds. Refuse rather than alias.
+        if n_cycles > 31:
+            raise ValueError(
+                f"n_cycles={n_cycles} exceeds the 31-wide stride of `seed * 31 + c`: chunk "
+                "seeds alias across base seeds. Widen the multiplier in _chunk_seed and "
+                "regenerate every affected run before going past 31 cycles.")
+
+        # Splits must sit on separate trajectories, and that is enforced by construction here.
+        self.split_seeds = dict(val=seed + VAL_SEED_OFFSET, test=seed + TEST_SEED_OFFSET,
+                                **{f"chunk{c}": self._chunk_seed(c) for c in range(n_cycles)})
+        counts = list(self.split_seeds.values())
+        dupes = sorted(k for k, v in self.split_seeds.items() if counts.count(v) > 1)
+        if dupes:
+            raise ValueError(f"split seeds collide at base seed {seed}: {dupes}")
+
         self.val = _load(n_val, seed + VAL_SEED_OFFSET, noise, history, F)
         # Shares the rollout initial conditions' trajectory; only ever reported, never selected on.
         self.test_seed = seed + TEST_SEED_OFFSET
         self.test = _load(n_test or n_val, self.test_seed, noise, history, F)
-        self._chunks = [_load(chunk, seed * 31 + c, noise, history, F) for c in range(n_cycles)]
+        self._chunks = [_load(chunk, self._chunk_seed(c), noise, history, F)
+                        for c in range(n_cycles)]
+
+    def _chunk_seed(self, c):
+        return self.seed * 31 + c
 
     def cycle_data(self, cycle, data_all):
         # data_all=True gives everything seen so far; False gives only the newest chunk.
@@ -63,12 +84,3 @@ class CycleStream:
 
     def seeds(self, cycle):
         return derive_seeds(self.seed, cycle)
-
-    def assert_no_leakage(self):
-        # Val/test must not appear in any chunk.
-        for name, split in (("validation", self.val), ("test", self.test)):
-            h = {hash(r.numpy().tobytes()) for r in split.x[:256]}
-            for c, ch in enumerate(self._chunks):
-                hits = h & {hash(r.numpy().tobytes()) for r in ch.x}
-                assert not hits, f"{name} window found in training chunk {c}"
-        return True

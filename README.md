@@ -59,29 +59,59 @@ something to carry forward.
 `lorenz96/` was copied verbatim from `7316834`. The numerics are verified — λ₁ matches the
 literature at F=8, the tangent linear model tracks divergence across eight orders of
 magnitude, attractor statistics match to a total-variation distance of 0.0086 — but the
-module encodes methodological choices that were never made explicit. These are open, and
-each needs a decision recorded before it is built on:
+module encoded methodological choices that were never made explicit. Items 1–6 below have
+since been decided and fixed; 7–8 are known limits accepted on the record.
 
-1. `metrics.nrmse_curve` divides by the standard deviation of the *evaluation window*, so it
-   re-normalises per regime. This silently undoes the frozen normalisation `data.py` and
-   `docs/TRANSFER.md` exist to protect, and will deflate any comparison at F ≠ 8 (~28% at
-   F=12). **This one is a bug, not a judgment call.**
-2. `stream.py` seeds training chunks `seed * 31 + c`. Safe now; at `N_CYCLES ≥ 32` different
-   seeds silently begin sharing training data.
-3. `stream.assert_no_leakage` compares exact float64 bytes across trajectories that are
-   independent by construction, so it cannot fail. It provides no evidence for the property
-   it names.
-4. `metrics.evaluate` defaults to `seed=0`. Callers must pass a held-out seed explicitly —
-   the predecessor's `train.py` did not, which made every number in its `RESULTS.md`
-   in-sample.
-5. `metrics.valid_prediction_time` censors silently at both ends: 0 if the error curve starts
-   above threshold, `len(curve)` if it never crosses.
-6. `data.load_subset` hard-codes `seed=0` for the underlying pool, so only subset selection
-   varies with seed — not the trajectory, not the noise draw.
-7. Valid prediction time is quantised to `STRIDE × DT` = 0.05 MTU; differences below ~0.1 MTU
-   are at the metric's resolution.
+None of this touched the training path. `train.py` computes losses, diagnostics and
+checkpoints and never imports `lorenz96.metrics`, so no completed run needs regenerating.
+
+### Resolved
+
+1. **`metrics.nrmse_curve` denominator (was a bug, now fixed).** It divided by the standard
+   deviation of the *evaluation window*, re-normalising per regime and cancelling exactly the
+   frozen normalisation `data.py` and `docs/TRANSFER.md` exist to protect. Because Var(X)
+   grows with F, that deflated every error at F > 8 — 17% at F=10, 28% at F=12 — flattering
+   the post-shift regime in the one comparison this project is built to make. The denominator
+   is now the frozen reference climatology, which is 1.0 by construction since `truth` already
+   arrives in frozen-normalised units. `per_regime=True` restores the local skill-score
+   reading, which is a different question and is never comparable across F.
+2. **`stream.assert_no_leakage` removed, replaced by a constructive check.** It compared
+   float64 bytes across trajectories that are independent by construction, so it could not
+   fail and evidenced nothing. `CycleStream.__init__` now checks the property that actually
+   matters — that no two splits share a trajectory seed — the same way `ShiftStream` already
+   did. This immediately caught a real latent collision: at base seed 233 with 11+ cycles,
+   `chunk10` and `test` land on the same seed.
+3. **`metrics.evaluate` default seed.** Was `seed=0`, which *is* the old-regime training seed
+   — the mechanism that made every number in the predecessor's `RESULTS.md` in-sample. Now
+   defaults to `EVAL_SEED_OFFSET = 17_000`, a band above every pool seed in use. An evaluator
+   scoring a run should still pass `run_seed + EVAL_SEED_OFFSET`.
+4. **`metrics.valid_prediction_time` censoring is now explicit.** The returned dict carries
+   `censored`: `"left"` when the curve starts above threshold (never skilful — 0.0 is exact
+   but carries no magnitude, so it must not be averaged against real horizons), `"right"` when
+   it never crosses (the horizon is a lower bound, so a mean mixing these with real crossings
+   is biased low). Both were previously indistinguishable from measured values.
+5. **Valid prediction time is no longer quantised to `STRIDE × DT` = 0.05 MTU.** The threshold
+   crossing is linearly interpolated between the bracketing eval points, so `steps` is
+   fractional and differences well below 0.05 MTU are resolvable. Interpolating rather than
+   shrinking `STRIDE` is deliberate: `STRIDE` is baked into every trained checkpoint, and
+   changing it would invalidate them.
+6. **`data.load_subset` pool seed.** It hard-coded `seed=0` for the underlying pool, so only
+   subset selection varied with seed — not the trajectory, not the noise draw, which makes an
+   across-seed error bar a measure of subset choice and weight init alone. The pool now
+   follows `seed`, so one seed is one complete replication, matching what `ShiftStream`
+   already does. The subset draw moved to its own band (`SUBSET_SEED_OFFSET = 3_000`).
+
+### Accepted limits
+
+7. `stream.py` seeds training chunks `seed * 31 + c`, so at `n_cycles ≥ 32` chunk *c* of seed
+   *s* is chunk *c−31* of seed *s+1* and two runs silently share training data. Not
+   redesigned — no planned experiment goes near 32 cycles — but the constructor now raises
+   rather than aliasing, so the failure cannot happen quietly.
 8. `metrics.LAMBDA1` is a hard-coded table measured by `explore.py`, linearly interpolated
-   between the measured forcings.
+   between the measured forcings. λ₁ is concave in F, so interpolation underestimates it and
+   overestimates horizons in Lyapunov times. It is *exact* at the measured forcings, which
+   includes both regimes of the shift experiment (F=8 and F=10), so this experiment incurs no
+   interpolation error at all.
 
 Beyond these, the module fixes `STRIDE=5`, `SPINUP=5000`, `REFERENCE_F=8`, tendency targets
 rather than next-state targets, observation noise applied once to the whole trajectory (so

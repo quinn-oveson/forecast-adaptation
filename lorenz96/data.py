@@ -65,9 +65,19 @@ def make_dataset(F=REFERENCE_F, n=10_000, seed=0, stride=STRIDE, noise=0.0, dt=D
     return _to_pairs(traj, stride, noise, seed)
 
 
+# The subset draw gets its own band so it stays independent of the trajectory and noise
+# streams derived from the same base seed.
+SUBSET_SEED_OFFSET = 3_000
+
+
 def load_subset(n, seed, F=REFERENCE_F, pool=20_000, **kwargs):
-    full = make_dataset(F, pool, seed=0, **kwargs)
-    g = torch.Generator().manual_seed(seed)
+    # The pool follows `seed`, so one seed is one complete replication: trajectory, noise draw
+    # and subset all move together. Pinning the pool at seed=0 -- what this did before -- left
+    # only the subset selection varying, which makes an across-seed error bar a measure of
+    # subset choice and weight init alone and understates the true spread. ShiftStream already
+    # derives its pools from the run seed; this matches it.
+    full = make_dataset(F, pool, seed=seed, **kwargs)
+    g = torch.Generator().manual_seed(seed + SUBSET_SEED_OFFSET)
     idx = torch.randperm(full.x.shape[0], generator=g)[:n]
     return Batch(*(t[idx] for t in full))
 
