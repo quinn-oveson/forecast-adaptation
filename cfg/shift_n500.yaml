@@ -1,0 +1,89 @@
+# Uniform forcing shift, SCARCER post-shift pool: identical to cfg/shift.yaml in every
+# respect except n_new, which drops 2000 -> 500 (old:new goes 10:1 -> 40:1).
+#
+# Two consequences worth knowing before reading the results:
+#
+#   1. `natural` is DEFINED as the pooled proportion, so it moves with n_new: it was
+#      2000/22000 = 0.0909 (23 new per 256-batch) and is now 500/20500 = 0.0244 (6 per batch).
+#      The natural arm is therefore not the same intervention as in results/shift -- it is the
+#      natural rate for THIS pool. The fixed ratios (0.25/0.5/0.75/1.0) are unchanged.
+#
+#   2. At ratio 1.0 the model draws 256 samples per batch, with replacement, from 500. In
+#      results/shift the same arms already overfit hard -- warm_new peaked at step ~202 of
+#      6000 and then degraded ~8x. Expect the optimum to arrive earlier still. The budget is
+#      deliberately left at 6000 so the arms stay matched to the n_new=2000 run; selection is
+#      best_next and every arm there reached an interior optimum, so a long budget costs
+#      nothing but wall time. Check best_at_boundary_next in runs.csv anyway.
+#
+# Values here are the ones chosen for this experiment. They are not defaults and not the
+# register's answers -- notes/DECISIONS.md is still open on every entry named below.
+
+seed: 0
+data_seed: null
+init_seed: null
+shuffle_seed: null
+
+device: auto
+enforce_determinism: false   # T11
+
+data:
+  source: shift
+  noise: 0.05                # O6
+  history: 4                 # D2
+  n_val: 4000                # S8; held-out val in BOTH regimes, separate trajectories
+  n_test: null
+  F_old: 8.0                 # E5 pre-shift  (lambda_1 = 1.671)
+  F_new: 10.0                # E5 post-shift (lambda_1 = 2.278, +36%)
+  n_old: 20000               # S7 the "lots of data" pool
+  n_new: 500                 # S7 the scarce post-shift pool, 40:1 (was 2000 = 10:1)
+  mix_ratio: natural         # E4 fraction of each BATCH drawn from the new regime.
+                             #   0.0     = old only          (pre-training)
+                             #   natural = pooled proportion (train on everything)
+                             #   1.0     = new only          (no replay)
+
+model:
+  hidden: 512                # N3
+  n_layers: 3                # N2
+  kernel: 5                  # N2
+  heteroscedastic: false
+  pos_embed: null
+
+train:
+  lr: 1.0e-3                 # T6
+  batch_size: 256            # T5
+  budget_steps: 6000         # T4/T7: equal for every matched arm
+  loss_target: noisy         # O7
+  weight_decay: 0.0          # T10
+  grad_clip: null            # T10
+  schedule: constant         # T8
+  warmup_steps: 0
+  warmup_factor: 1.0
+  optimizer: adam            # T1
+  betas: [0.9, 0.999]
+  drop_last: true
+  budget_unit: steps         # T3
+  loss: mse                  # T9
+
+eval:
+  kind: log                  # C5
+  n: 60
+  steps: null
+  batch_size: 1024
+
+diagnostics:
+  enabled: true
+  probe_n: 256               # M12
+  probe_sampling: random     # M12
+  at: [start, best, final]
+
+intervention:
+  kind: none                 # snp / dash / cbp available; dash and cbp raise
+  params: null
+
+io:
+  out_dir: results/shift_n500
+  save: [best_next, final]      # C1/C2: selection is the next-state criterion
+  init_from: null
+  carry_optimizer: false     # T2
+  run_id: null
+  overwrite: false
