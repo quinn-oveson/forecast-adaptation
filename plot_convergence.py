@@ -19,6 +19,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plotting import figure_path
+
 COLOR = {"cold_new": "#eb6834", "warm_new": "#1baf7a"}
 LABEL = {"cold_new": "cold_new  (from scratch)", "warm_new": "warm_new  (from pretrain)"}
 INK, MUTED, GRID, SURFACE = "#0b0b0b", "#52514e", "#d8d7d2", "#fcfcfb"
@@ -45,8 +47,10 @@ def load(exp):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exp-dir", default="results/shift")
-    ap.add_argument("--out", default="figures/shift_convergence_new.png")
+    ap.add_argument("--out", default=None,
+                    help="override the default figures/<exp-dir-name>/<name>.png")
     args = ap.parse_args()
+    out = figure_path(args.exp_dir, "convergence_new", args.out)
     exp = Path(args.exp_dir)
     tr, best = load(exp)
 
@@ -110,9 +114,9 @@ def main():
         a.tick_params(colors=MUTED, labelsize=9, length=0)
 
     fig.subplots_adjust(left=0.135, right=0.975, top=0.865, bottom=0.085)
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=200, facecolor=SURFACE)
-    print(f"wrote {args.out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=200, facecolor=SURFACE)
+    print(f"wrote {out}")
 
 
 if __name__ == "__main__":

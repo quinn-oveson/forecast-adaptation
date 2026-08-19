@@ -17,6 +17,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plotting import figure_path
+
 # Slots 2 and 3 of the dataviz reference palette, matching the stage colours used in
 # figures/shift_new_regime_mse.png: cold = orange, warm = aqua.
 COLOR = {"cold_new": "#eb6834", "warm_new": "#1baf7a"}
@@ -46,8 +48,10 @@ def load(path, arms):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exp-dir", default="results/shift")
-    ap.add_argument("--out", default="figures/shift_cold_vs_warm_new.png")
+    ap.add_argument("--out", default=None,
+                    help="override the default figures/<exp-dir-name>/<name>.png")
     args = ap.parse_args()
+    out = figure_path(args.exp_dir, "cold_vs_warm_new", args.out)
 
     d = load(Path(args.exp_dir) / "rollout_new.csv", set(COLOR))
     days = d["cold_new"][0]
@@ -115,9 +119,9 @@ def main():
             fontsize=9.5, color=MUTED)
 
     fig.subplots_adjust(left=0.115, right=0.975, top=0.86, bottom=0.095)
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=200, facecolor=SURFACE)
-    print(f"wrote {args.out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=200, facecolor=SURFACE)
+    print(f"wrote {out}")
 
 
 if __name__ == "__main__":

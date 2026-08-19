@@ -21,6 +21,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plotting import figure_path
 from run_shift import PRETRAIN
 
 # dataviz reference palette, categorical slots 1-3 (light mode). Three is the documented cap
@@ -126,12 +127,14 @@ def plot(by_arm, out_path, title_note=""):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exp-dir", default="results/shift")
-    ap.add_argument("--out", default="figures/shift_new_regime_mse.png")
+    ap.add_argument("--out", default=None,
+                    help="override the default figures/<exp-dir-name>/<name>.png")
     args = ap.parse_args()
     by_arm = load(args.exp_dir)
     n = {len(v) for v in by_arm.values()}
     note = "" if n == {5} else f"  — INCOMPLETE: {sorted(n)} seeds per arm"
-    plot(by_arm, args.out, note)
+    plot(by_arm, figure_path(args.exp_dir, "new_regime_mse", args.out),
+         note)
 
 
 if __name__ == "__main__":

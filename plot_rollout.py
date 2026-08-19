@@ -16,6 +16,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plotting import figure_path
+
 # dataviz reference palette. Controls: categorical slots 1-4. Sweep: the documented blue
 # ordinal ramp, steps 250-650 (nothing lighter than 250 on a light surface).
 CONTROL_COLOR = {"pretrain": "#2a78d6", "cold_all": "#eb6834",
@@ -81,8 +83,10 @@ def panel(ax, curves, series, title, ref=()):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exp-dir", default="results/shift")
-    ap.add_argument("--out", default="figures/shift_rollout_new_regime.png")
+    ap.add_argument("--out", default=None,
+                    help="override the default figures/<exp-dir-name>/<name>.png")
     args = ap.parse_args()
+    out = figure_path(args.exp_dir, "rollout_new_regime", args.out)
 
     curves = load(Path(args.exp_dir) / "rollout_new.csv")
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11.5, 5.0), sharey=True)
@@ -102,9 +106,9 @@ def main():
     fig.text(0.045, 0.905, "mean of 5 seeds; one model step = 6 h; "
              "1 Lyapunov time at F=10 ≈ 2.2 days", fontsize=9.5, color=MUTED, ha="left")
     fig.tight_layout(rect=(0, 0, 1, 0.88))
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.out, dpi=200, facecolor=SURFACE)
-    print(f"wrote {args.out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=200, facecolor=SURFACE)
+    print(f"wrote {out}")
 
 
 if __name__ == "__main__":
