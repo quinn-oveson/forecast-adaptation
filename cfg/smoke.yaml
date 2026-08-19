@@ -1,0 +1,78 @@
+# Example config for train.py. Every field is written out, including the ones that have
+# mechanical defaults, so a run has no invisible values -- this file is the record.
+#
+# The VALUES here are round 1's inherited values, reproduced so the file runs end to end. None
+# of them is a decision. The comment on each line names the notes/DECISIONS.md entry it answers;
+# every one of those entries is still open. Copy this file and edit before any production run.
+
+seed: 0
+# S1: unset means data, noise, init and batch order all derive from `seed` (the inherited
+# coupling). Pin any of them to separate data variance from optimization variance.
+data_seed: null
+init_seed: null
+shuffle_seed: null
+
+device: auto
+enforce_determinism: false   # T11: recorded either way; run-to-run spread is unmeasured
+
+data:
+  source: cycle              # "cycle" = equal chunks at one forcing; "shift" = see cfg/shift.yaml
+  noise: 0.05                # O6 observation noise, normalized units
+  history: 4                 # D2 (round 1's justification was in-sample and does not survive)
+  n_val: 200
+  n_test: null               # mechanical: null -> n_val
+  F: 8.0                     # A5 reference forcing; a list is rejected (per-site F unsupported)
+  n_cycles: 3
+  chunk: 400
+  cycle: 0                   # which chunk index this run trains at
+  data_mix: all              # E4: "all" = everything so far, "new" = newest chunk only
+  # shift-only keys (F_old, F_new, n_old, n_new, mix_ratio) must stay unset under source=cycle
+
+model:
+  hidden: 32
+  n_layers: 3                # N2 -> receptive field 13 of 40 sites
+  kernel: 5                  # N2 (the L96 stencil is 4 wide)
+  heteroscedastic: false     # N4; true raises, NLL loss not implemented
+  pos_embed: null            # N5; non-null raises, E4 prerequisite
+
+train:
+  lr: 1.0e-3                 # T6
+  batch_size: 64
+  budget_steps: 40
+  loss_target: noisy         # O7: train against the observation, as an operational model does
+  weight_decay: 0.0          # T10
+  grad_clip: null            # T10; null disables
+  schedule: constant         # T8: "constant" or "warmup"
+  warmup_steps: 0            # T8
+  warmup_factor: 1.0         # T8: lr starts at lr/factor and rises geometrically
+  optimizer: adam            # T1
+  betas: [0.9, 0.999]        # T1
+  drop_last: true            # T5
+  budget_unit: steps         # T3; only "steps" is implemented
+  loss: mse                  # T9
+
+eval:
+  kind: log                  # C5: log / linear / explicit
+  n: 60                      # C5
+  steps: null                # used only when kind is explicit
+  batch_size: 1024           # mechanical
+
+diagnostics:
+  enabled: true
+  probe_n: 64
+  probe_sampling: random     # M12: "first" reproduces the inherited overlapping-window probe
+  at: [start, best, final]   # mechanical: every_eval adds an SVD per eval point
+
+intervention:
+  kind: none                 # none / snp / dash (raises) / cbp (raises)
+  params: null
+  # kind: snp
+  # params: {shrink: 0.4, noise_scale: 0.01}
+
+io:
+  out_dir: results/smoke
+  save: [best_clean, best_noisy, final]   # C1/C2 stay open: all three are written
+  init_from: null            # warm start from a checkpoint written by an earlier run
+  carry_optimizer: false     # T2: warm weights with a cold optimizer unless set
+  run_id: null               # mechanical: null -> config hash
+  overwrite: false

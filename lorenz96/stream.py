@@ -11,8 +11,14 @@ TEST_SEED_OFFSET = 7_000
 
 class Split(NamedTuple):
     x: torch.Tensor        # (n, history, K) noisy observation windows
+    x_clean: torch.Tensor  # (n, history, K) true state, evaluation only
     y: torch.Tensor        # (n, K) noisy tendency target
     y_clean: torch.Tensor  # (n, K) true tendency, evaluation only
+
+    # x_clean is carried so validation can score the predicted NEXT STATE, x[:, -1] + pred,
+    # against the true next state x_clean[:, -1] + y_clean. Scoring the tendency against
+    # y_clean instead penalises the model for the -eps_t term it must emit: given a noisy
+    # input, the optimal tendency is E[c_t+1 | x] - x, which contains it by construction.
 
 
 def derive_seeds(seed, cycle):
@@ -27,9 +33,9 @@ def derive_seeds(seed, cycle):
 def _stack_history(b, history):
     # Sliding windows of past observations; targets align to the last frame of each window.
     if history == 1:
-        return Split(b.x.unsqueeze(1), b.y, b.y_clean)
-    x = torch.stack([b.x[i:len(b.x) - history + 1 + i] for i in range(history)], dim=1)
-    return Split(x, b.y[history - 1:], b.y_clean[history - 1:])
+        return Split(b.x.unsqueeze(1), b.x_clean.unsqueeze(1), b.y, b.y_clean)
+    stack = lambda a: torch.stack([a[i:len(a) - history + 1 + i] for i in range(history)], dim=1)
+    return Split(stack(b.x), stack(b.x_clean), b.y[history - 1:], b.y_clean[history - 1:])
 
 
 def _load(n, seed, noise, history, F):

@@ -4,8 +4,9 @@ import platform
 import socket
 import subprocess
 from dataclasses import dataclass, field, fields, is_dataclass
+from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Union, get_args, get_origin
 
 import numpy as np
 import torch
@@ -31,15 +32,28 @@ MAX_CYCLES = 31
 
 @dataclass(frozen=True)
 class Data:
-    F: Any = REQUIRED                    # A5/E5; scalar only, per-site rejected in validate
+    # `source` selects the provisioning path; the fields for the other path stay null so no
+    # value is live but unused.
+    source: str = REQUIRED               # "cycle" | "shift"
     noise: float = REQUIRED              # O6
     history: int = REQUIRED              # D2
-    n_cycles: int = REQUIRED             # S7
-    chunk: int = REQUIRED                # S7
     n_val: int = REQUIRED                # S8
-    cycle: int = REQUIRED                # which chunk index this run trains at
-    data_mix: str = REQUIRED             # "all" | "new"   E4
     n_test: Optional[int] = None         # mechanical: None -> n_val
+
+    # source == "cycle": equal chunks arriving at one forcing (round 1's shape)
+    F: Any = None                        # A5; scalar only, per-site rejected in validate
+    n_cycles: Optional[int] = None       # S7
+    chunk: Optional[int] = None          # S7
+    cycle: Optional[int] = None          # which chunk index this run trains at
+    data_mix: Optional[str] = None       # "all" | "new"   E4, binary form
+
+    # source == "shift": a large old-regime pool and a small new-regime one
+    F_old: Any = None                    # E5 pre-shift forcing
+    F_new: Any = None                    # E5 post-shift forcing
+    n_old: Optional[int] = None          # S7 asymmetric arrival
+    n_new: Optional[int] = None          # S7
+    mix_ratio: Any = None                # E4 swept ratio: fraction of each batch drawn from
+                                         # the new regime, or "natural" for pooled proportion
 
 
 @dataclass(frozen=True)
@@ -119,8 +133,33 @@ class Config:
     enforce_determinism: bool = False    # T11; recorded either way, never assumed
 
 
-SAVE_TAGS = ("best_clean", "best_noisy", "final")
+SAVE_TAGS = ("best_clean", "best_noisy", "best_next", "final")
 DIAG_PHASES = ("start", "best", "final", "every_eval")
+
+
+def _scalar_type(annotation):
+    # Unwraps Optional[T] so a declared float still coerces when the key may be null.
+    if get_origin(annotation) is Union:
+        inner = [a for a in get_args(annotation) if a is not type(None)]
+        return inner[0] if len(inner) == 1 else None
+    return annotation
+
+
+def _coerce(annotation, value):
+    # YAML 1.1 reads `1e-3` as a string, not a float, so a learning rate written the obvious way
+    # would reach Adam as text. Declared scalar types are enforced rather than trusted.
+    if value is None or isinstance(value, _Required):
+        return value
+    t = _scalar_type(annotation)
+    if t is bool:
+        return value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true",
+                                                                                   "yes", "on")
+    if t in (int, float, str):
+        try:
+            return t(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"expected {t.__name__}, got {value!r}") from exc
+    return value
 
 
 def _build(cls, raw):
@@ -130,7 +169,10 @@ def _build(cls, raw):
         if is_dataclass(f.type):
             kwargs[f.name] = _build(f.type, raw.pop(f.name, {}))
         elif f.name in raw:
-            kwargs[f.name] = raw.pop(f.name)
+            try:
+                kwargs[f.name] = _coerce(f.type, raw.pop(f.name))
+            except ValueError as exc:
+                raise ValueError(f"config key {f.name!r}: {exc}") from None
     if raw:
         raise ValueError(f"unknown config keys under {cls.__name__}: {sorted(raw)}")
     return cls(**kwargs)
@@ -176,12 +218,33 @@ def validate(cfg):
 
     d, m, t, e, g, io = cfg.data, cfg.model, cfg.train, cfg.eval, cfg.diagnostics, cfg.io
 
-    if not np.isscalar(d.F):
-        raise ValueError(
-            f"data.F must be a scalar, got {type(d.F).__name__}. Per-site forcing needs "
-            "system.integrate to accept a per-site vector (it reads a non-scalar F as a "
-            "per-step schedule and rejects the wrong length at system.py:44-46) and needs a "
-            "model that is not translation-equivariant. See notes/E4_PRECOMMITMENT.md sec 7.")
+    if d.source not in ("cycle", "shift"):
+        raise ValueError(f"data.source must be 'cycle' or 'shift', got {d.source!r}")
+
+    forcings = ("F",) if d.source == "cycle" else ("F_old", "F_new")
+    for name in forcings:
+        value = getattr(d, name)
+        if value is None:
+            raise ValueError(f"data.{name} is required when data.source={d.source!r}")
+        if not np.isscalar(value):
+            raise ValueError(
+                f"data.{name} must be a scalar, got {type(value).__name__}. Per-site forcing "
+                "needs system.integrate to accept a per-site vector (it reads a non-scalar F as "
+                "a per-step schedule and rejects the wrong length at system.py:44-46) and needs "
+                "a model that is not translation-equivariant. See "
+                "notes/E4_PRECOMMITMENT.md sec 7.")
+
+    if d.source == "shift":
+        for name in ("n_old", "n_new", "mix_ratio"):
+            if getattr(d, name) is None:
+                raise ValueError(f"data.{name} is required when data.source='shift'")
+        if d.mix_ratio != "natural" and not 0.0 <= float(d.mix_ratio) <= 1.0:
+            raise ValueError(
+                f"data.mix_ratio must be in [0, 1] or 'natural', got {d.mix_ratio!r}. It is the "
+                "fraction of every batch drawn from the new regime (E4).")
+        stale = [n for n in ("n_cycles", "chunk", "cycle", "data_mix") if getattr(d, n) is not None]
+        if stale:
+            raise ValueError(f"data.source='shift' but cycle-only keys are set: {stale}")
     if m.pos_embed is not None:
         raise NotImplementedError(
             "model.pos_embed is a seam, not a feature: CircularCNN is weight-shared and has no "
@@ -191,6 +254,21 @@ def validate(cfg):
         raise NotImplementedError(
             "model.heteroscedastic requires an NLL loss; train.py implements MSE only (T9/N4).")
 
+    if d.source == "cycle":
+        for name in ("n_cycles", "chunk", "cycle", "data_mix"):
+            if getattr(d, name) is None:
+                raise ValueError(f"data.{name} is required when data.source='cycle'")
+        stale = [n for n in ("F_old", "F_new", "n_old", "n_new", "mix_ratio")
+                 if getattr(d, n) is not None]
+        if stale:
+            raise ValueError(f"data.source='cycle' but shift-only keys are set: {stale}")
+        _validate_cycle(d)
+
+    _validate_rest(cfg)
+    return cfg
+
+
+def _validate_cycle(d):
     if d.data_mix not in ("all", "new"):
         raise ValueError(f"data.data_mix must be 'all' or 'new' (E4), got {d.data_mix!r}")
     if not 0 <= d.cycle < d.n_cycles:
@@ -201,6 +279,11 @@ def validate(cfg):
             "as s*31+c, so at 32 cycles seed s chunk 31 collides with seed s+1 chunk 0 and "
             "different seeds silently share training data (S4).")
 
+
+def _validate_rest(cfg):
+    t, e, g, io = cfg.train, cfg.eval, cfg.diagnostics, cfg.io
+    if t.budget_steps < 1:
+        raise ValueError(f"train.budget_steps must be >= 1, got {t.budget_steps}")
     if t.loss_target not in ("noisy", "clean"):
         raise ValueError(f"train.loss_target must be 'noisy' or 'clean' (O7), got {t.loss_target!r}")
     if t.optimizer != "adam":
@@ -256,7 +339,9 @@ def eval_step_grid(cfg):
 def resolved_seeds(cfg):
     # S1 stays open: each stream may be pinned independently, else all derive from `seed`.
     from .stream import derive_seeds
-    derived = derive_seeds(cfg.seed, cfg.data.cycle)
+    # Under source='shift' there is no cycle index; 0 keeps every arm on the same init draw,
+    # which is what E8 requires for a matched comparison.
+    derived = derive_seeds(cfg.seed, cfg.data.cycle or 0)
     return dict(seed=cfg.seed,
                 data_seed=cfg.data_seed if cfg.data_seed is not None else derived["data_seed"],
                 noise_seed=derived["noise_seed"],
@@ -304,8 +389,32 @@ def flat_columns(cls=Config, prefix="cfg::"):
     return cols
 
 
+def _plain(obj):
+    # asdict leaves tuples in place (betas, diagnostics.at) and yaml.safe_dump rejects them.
+    if isinstance(obj, dict):
+        return {k: _plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_plain(v) for v in obj]
+    return obj
+
+
+def dump(cfg, path):
+    # A resolved snapshot, written once at submission. Queued array tasks read this instead of
+    # cfg/*.yaml, so editing the working config while an array sits in the queue cannot silently
+    # change what those tasks run.
+    from dataclasses import asdict
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as fh:
+        yaml.safe_dump(_plain(asdict(cfg)), fh, sort_keys=False, default_flow_style=False)
+    return path
+
+
 def config_hash(cfg):
-    flat = {k: v for k, v in flatten(cfg).items() if not k.startswith("cfg::io.")}
+    ignored = ("cfg::io.out_dir", "cfg::io.run_id", "cfg::io.overwrite", "cfg::io.save")
+    # io.init_from and io.carry_optimizer stay in: they are what separates cold_new from
+    # warm_new, and excluding them would collide two different arms onto one run_id.
+    flat = {k: v for k, v in flatten(cfg).items() if k not in ignored}
     payload = json.dumps(flat, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
 

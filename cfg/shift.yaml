@@ -1,0 +1,76 @@
+# Uniform forcing shift: a large pre-shift pool at F_old, a small post-shift pool at F_new.
+# The arms are all compositions of (init source x mix_ratio), so this one file plus overrides
+# expresses every arm; run_shift.py drives them.
+#
+# Values here are the ones chosen for this experiment. They are not defaults and not the
+# register's answers -- notes/DECISIONS.md is still open on every entry named below.
+
+seed: 0
+data_seed: null
+init_seed: null
+shuffle_seed: null
+
+device: auto
+enforce_determinism: false   # T11
+
+data:
+  source: shift
+  noise: 0.05                # O6
+  history: 4                 # D2
+  n_val: 4000                # S8; held-out val in BOTH regimes, separate trajectories
+  n_test: null
+  F_old: 8.0                 # E5 pre-shift  (lambda_1 = 1.671)
+  F_new: 10.0                # E5 post-shift (lambda_1 = 2.278, +36%)
+  n_old: 20000               # S7 the "lots of data" pool
+  n_new: 2000                # S7 the scarce post-shift pool, 10:1
+  mix_ratio: natural         # E4 fraction of each BATCH drawn from the new regime.
+                             #   0.0     = old only          (pre-training)
+                             #   natural = pooled proportion (train on everything)
+                             #   1.0     = new only          (no replay)
+
+model:
+  hidden: 512                # N3
+  n_layers: 3                # N2
+  kernel: 5                  # N2
+  heteroscedastic: false
+  pos_embed: null
+
+train:
+  lr: 1.0e-3                 # T6
+  batch_size: 256            # T5
+  budget_steps: 6000         # T4/T7: equal for every matched arm
+  loss_target: noisy         # O7
+  weight_decay: 0.0          # T10
+  grad_clip: null            # T10
+  schedule: constant         # T8
+  warmup_steps: 0
+  warmup_factor: 1.0
+  optimizer: adam            # T1
+  betas: [0.9, 0.999]
+  drop_last: true
+  budget_unit: steps         # T3
+  loss: mse                  # T9
+
+eval:
+  kind: log                  # C5
+  n: 60
+  steps: null
+  batch_size: 1024
+
+diagnostics:
+  enabled: true
+  probe_n: 256               # M12
+  probe_sampling: random     # M12
+  at: [start, best, final]
+
+intervention:
+  kind: none                 # snp / dash / cbp available; dash and cbp raise
+  params: null
+
+io:
+  out_dir: results/shift
+  save: [best_next, final]      # C1/C2: selection is the next-state criterion
+  init_from: null
+  carry_optimizer: false     # T2
+  run_id: null
+  overwrite: false
