@@ -8,4 +8,4 @@ dependencies:
   - numpy=2.5
   - matplotlib
   - torchvision
-  - yaml
+  - pyyaml
