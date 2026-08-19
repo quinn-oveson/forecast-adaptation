@@ -91,12 +91,19 @@ def main():
     ax.text(horizon * 1.06, 1.7e-3, "beyond useful horizon\n(NRMSE > 0.3): both arms are\n"
             "saturating into climatology,\nso the ratio is noise",
             fontsize=8, color=MUTED, ha="left", va="bottom")
-    rx.text(0.985, 0.985, "warm_new worse", transform=rx.transAxes, ha="right", va="top",
-            fontsize=8, color=MUTED)
-    rx.text(0.985, 0.03, "warm_new better", transform=rx.transAxes, ha="right", va="bottom",
-            fontsize=8, color=MUTED)
-    rx.set_ylabel("paired ratio\nwarm ÷ cold", fontsize=9, color=MUTED)
-    rx.set_ylim(0.78, 1.14)
+    # The direction lives in the axis label rather than in floating "better"/"worse" text:
+    # with adaptive limits the 1.0 line moves, and those labels collided with it.
+    rx.set_ylabel("paired ratio\nwarm ÷ cold\n(< 1 = warm better)", fontsize=9, color=MUTED)
+    # Adaptive, not hardcoded: the effect size differs a lot between experiments (~0.90 at
+    # n_new=2000, ~0.75 at n_new=500) and a fixed window clips one of them. Limits are set from
+    # the data INSIDE the useful horizon -- past it the seed ratios diverge wildly and would
+    # dominate the range. 1.0 is always included so "no difference" stays on screen.
+    inside = days <= horizon
+    lo = min(1.0, float(np.nanmin(ratio[:, inside])))
+    hi = max(1.0, float(np.nanmax(ratio[:, inside])))
+    pad = 0.08 * (hi - lo)
+    rx.set_ylim(lo - pad, hi + pad)
+    print(f"  paired-ratio y-range: {lo - pad:.3f} to {hi + pad:.3f}")
     rx.set_xlabel("forecast lead time (days)", fontsize=9.5, color=MUTED)
 
     for a in (ax, rx):
