@@ -52,11 +52,9 @@ STAGES = ("pretrain", "cold", "conv", "warm")
 CONFIG_SNAPSHOT = "config.resolved.yaml"
 GRID_SNAPSHOT = "grid.yaml"
 
-# Placeholders. The sbatch scripts say it plainly: calibrate one cell of each tier and replace
-# these with measured numbers before submitting a full array. Locally a 1x cell is ~24 s of
-# NumPy RK4 (150k steps, CPU-bound and unaffected by the GPU) plus the training itself.
-TIER_RESOURCES = {"pretrain": (8, "00:30:00"), "cold": (8, "00:30:00"),
-                  "warm": (8, "00:30:00"), "conv": (8, "04:00:00")}
+# Measured from dry run 
+TIER_RESOURCES = {"pretrain": (4, "00:10:00"), "cold": (4, "00:10:00"),
+                  "warm": (4, "00:10:00"), "conv": (4, "00:30:00")}
 
 
 @dataclass(frozen=True)
